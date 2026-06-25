@@ -1093,7 +1093,12 @@ function resolveFileNamespace(namespaceFile, config) {
  * @returns {boolean}
  */
 function isLikelyTranslationKey(rawKey, lineText, keyStartCharacter) {
-  if (!rawKey || rawKey.length === 0) {
+  if (!rawKey || rawKey.length < 2) {
+    return false;
+  }
+
+  // Must contain at least one letter or digit
+  if (!/[a-zA-Z0-9]/.test(rawKey)) {
     return false;
   }
 
@@ -1109,8 +1114,23 @@ function isLikelyTranslationKey(rawKey, lineText, keyStartCharacter) {
     return true;
   }
 
-  // Fallback: key uses a dot or namespace separator — likely a nested i18n key
-  return rawKey.includes('.') || rawKey.includes(':');
+  // Fallback: key uses a dot or namespace separator — likely a nested i18n key.
+  // Additionally require minimum length and no camelCase (camelCase suggests
+  // a technical identifier like 'editorCodeLens.foreground', not an i18n key).
+  if (rawKey.includes('.') || rawKey.includes(':')) {
+    if (rawKey.length < 4) {
+      return false;
+    }
+
+    // camelCase pattern inside the key → technical identifier, not i18n
+    if (/[a-z][A-Z]/.test(rawKey)) {
+      return false;
+    }
+
+    return true;
+  }
+
+  return false;
 }
 
 // ─── Inline decorations ───────────────────────────────────────────────────────

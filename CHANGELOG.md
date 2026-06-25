@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2
+
+- Improved translation key detection: no longer flags single-char strings (e.g. ':'), strings without letters, or camelCase identifiers (e.g. 'editorCodeLens.foreground').
+
 ## 0.2.1
 
 - Fixed false positive diagnostics and decorations on import paths, package names, and other non-i18n strings. Now only string literals that follow a translation function call or contain a key separator are checked.
