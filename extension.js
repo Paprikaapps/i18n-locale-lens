@@ -125,9 +125,14 @@ function activate(context) {
   // Inline decorations: show translation text after key in editor
   inlineDecorationType = vscode.window.createTextEditorDecorationType({
     after: {
-      color: new vscode.ThemeColor('editorCodeLens.foreground'),
-      fontStyle: 'italic',
-      margin: '0 0 0 1em'
+      color: new vscode.ThemeColor('editorInlayHint.foreground'),
+      backgroundColor: new vscode.ThemeColor('editorInlayHint.background'),
+      fontStyle: 'normal',
+      border: '1px solid',
+      borderColor: new vscode.ThemeColor('editorInlayHint.background'),
+      borderRadius: '3px',
+      margin: '0 0 0 0.75em',
+      padding: '0 4px'
     }
   });
 
@@ -1115,15 +1120,19 @@ function isLikelyTranslationKey(rawKey, lineText, keyStartCharacter) {
   }
 
   // Fallback: key uses a dot or namespace separator — likely a nested i18n key.
-  // Additionally require minimum length and no camelCase (camelCase suggests
-  // a technical identifier like 'editorCodeLens.foreground', not an i18n key).
   if (rawKey.includes('.') || rawKey.includes(':')) {
     if (rawKey.length < 4) {
       return false;
     }
 
-    // camelCase pattern inside the key → technical identifier, not i18n
+    // camelCase → technical identifier (e.g. 'editorCodeLens.foreground')
     if (/[a-z][A-Z]/.test(rawKey)) {
+      return false;
+    }
+
+    // PascalCase or TitleCase segments → tracking/analytics event
+    // (e.g. 'User.Filtration.Click'). i18n keys are lowercase.
+    if (/(?:^|[.:])[A-Z]/.test(rawKey)) {
       return false;
     }
 
@@ -1179,7 +1188,8 @@ function collectInlineDecorations(document, workspaceFolder, config) {
     }
 
     // Truncate long values
-    const label = value.length > 60 ? value.slice(0, 57) + '…' : value;
+    const truncated = value.length > 50 ? value.slice(0, 47) + '…' : value;
+    const label = `→ ${truncated}`;
     const endPos = document.positionAt(match.index + match[0].length);
 
     decorations.push({

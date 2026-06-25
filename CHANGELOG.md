@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.3
+
+- Fixed false positive warnings on PascalCase/TitleCase dot-separated strings (e.g. Mixpanel tracking events like 'User.Filtration.Click').
+- Improved inline decoration style: uses inlay hint colors, rounded badge, and '→ ' prefix for better visibility.
+
 ## 0.2.2
 
 - Improved translation key detection: no longer flags single-char strings (e.g. ':'), strings without letters, or camelCase identifiers (e.g. 'editorCodeLens.foreground').
