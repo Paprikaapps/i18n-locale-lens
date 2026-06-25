@@ -14,6 +14,7 @@ const STRING_RANGE_REGEXP = /(['"`])((?:\\.|(?!\1).)*)(\1)/g;
 const STRING_CONSTANT_REGEXP = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(['"`])((?:\\.|(?!\2).)*)(\2)/g;
 const TEMPLATE_EXPRESSION_REGEXP = /\$\{([^}]+)\}/g;
 const IDENTIFIER_REGEXP = /^[A-Za-z_$][\w$]*$/;
+const TRANSLATION_CALL_REGEXP = /\bt\s*\(\s*$|\bi18n(?:\.t)?\s*\(\s*$|\btranslate(?:d)?\s*\(\s*$|\btranslation\s*\(\s*$/;
 
 /** @typedef {{ key: string, namespace: string | null }} TranslationKey */
 /** @typedef {{ enabledLanguageIds: string[], locales: string[], pathTemplates: string[], defaultNamespace: string, namespaceFileMap: Record<string, string>, namespaceSeparator: string, keySeparator: string, searchAllNamespaceFilesForKeysWithoutNamespace: boolean, resolveTemplateStringExpressions: boolean, ignoreTemplateStringsWithExpressions: boolean }} ExtensionConfig */
@@ -1080,6 +1081,38 @@ function resolveFileNamespace(namespaceFile, config) {
   return namespaceFile;
 }
 
+// ─── Translation key detection ───────────────────────────────────────────────
+
+/**
+ * Returns true when a raw string value and its context in the line suggest it is a translation key.
+ * Filters out import paths, package names, URLs, and other non-i18n strings.
+ *
+ * @param {string} rawKey string literal content.
+ * @param {string} lineText full text of the line.
+ * @param {number} keyStartCharacter character index of the opening quote on the line.
+ * @returns {boolean}
+ */
+function isLikelyTranslationKey(rawKey, lineText, keyStartCharacter) {
+  if (!rawKey || rawKey.length === 0) {
+    return false;
+  }
+
+  // Obvious non-keys: paths and scoped packages
+  if (rawKey.includes('/') || rawKey.startsWith('.') || rawKey.startsWith('@')) {
+    return false;
+  }
+
+  // Preceded by a translation function call on the same line
+  const prefix = lineText.slice(0, keyStartCharacter).trimEnd();
+
+  if (TRANSLATION_CALL_REGEXP.test(prefix)) {
+    return true;
+  }
+
+  // Fallback: key uses a dot or namespace separator — likely a nested i18n key
+  return rawKey.includes('.') || rawKey.includes(':');
+}
+
 // ─── Inline decorations ───────────────────────────────────────────────────────
 
 /**
@@ -1099,6 +1132,14 @@ function collectInlineDecorations(document, workspaceFolder, config) {
 
   while ((match = STRING_RANGE_REGEXP.exec(text))) {
     const rawKey = unescapeStringLiteral(match[2]);
+    const lineStart = text.lastIndexOf('\n', match.index) + 1;
+    const lineText = text.slice(lineStart, text.indexOf('\n', match.index) + 1 || text.length);
+    const keyStartCharacter = match.index - lineStart;
+
+    if (!isLikelyTranslationKey(rawKey, lineText, keyStartCharacter)) {
+      continue;
+    }
+
     const translationKey = parseTranslationKey(rawKey, config);
 
     if (!translationKey) {
@@ -1149,6 +1190,14 @@ function collectMissingKeyDiagnostics(document, workspaceFolder, config) {
 
   while ((match = STRING_RANGE_REGEXP.exec(text))) {
     const rawKey = unescapeStringLiteral(match[2]);
+    const lineStart = text.lastIndexOf('\n', match.index) + 1;
+    const lineText = text.slice(lineStart, text.indexOf('\n', match.index) + 1 || text.length);
+    const keyStartCharacter = match.index - lineStart;
+
+    if (!isLikelyTranslationKey(rawKey, lineText, keyStartCharacter)) {
+      continue;
+    }
+
     const translationKey = parseTranslationKey(rawKey, config);
 
     if (!translationKey) {

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1
+
+- Fixed false positive diagnostics and decorations on import paths, package names, and other non-i18n strings. Now only string literals that follow a translation function call or contain a key separator are checked.
+
 ## 0.2.0
 
 - Added hover tooltip: hovering over an i18n key shows its translated value for all configured locales.
