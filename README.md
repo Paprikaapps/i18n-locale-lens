@@ -1,24 +1,36 @@
 # i18n Locale Lens
 
-Jump between i18n keys in code and their JSON locale definitions — in both directions.
-
-- **Code → JSON:** put the cursor on an i18n key, press `F12` or Cmd/Ctrl-click it, and jump directly to the matching key in your locale JSON.
-- **JSON → Code:** put the cursor on a key inside a locale JSON file, press `F12` or Cmd/Ctrl-click it, and jump to all usages of that key in your source files.
+Jump from i18n keys in code to their JSON locale definitions, see translations inline, and catch missing keys automatically.
 
 ## Features
 
-- **Go to Definition** — press `F12` on a key to jump to its entry in the locale JSON.
-- **Hover tooltip** — hover over a key to see its translated value for all configured locales.
-- **Autocomplete** — get key suggestions when typing inside a string literal.
-- **Inline decorations** — the translated text is shown in italic directly after each key in the editor.
-- **Diagnostics** — keys with no matching entry in any locale JSON are underlined with a warning.
-- Supports JavaScript, TypeScript, JSX, and TSX by default.
-- Can be enabled for any VS Code language ID through settings.
-- Works with nested JSON objects and dot-separated keys.
-- Supports i18next-style namespaces such as `auth:login.title`.
-- Resolves simple template strings based on local string constants.
-- Supports configurable locale path templates.
-- Can search multiple locales and multiple namespace files.
+### Go to Definition
+Press `F12` or Cmd/Ctrl-click on any i18n key to jump directly to its entry in the locale JSON file.
+
+```ts
+t('task.canceled')  // F12 → opens common.json at the "canceled" key
+```
+
+### Inline Translation
+The translated value is displayed in italic right after each key in the editor — no need to open the JSON file to know what a key says.
+
+```ts
+t('task.filters.due date from')   Срок сдачи с
+t('auth:login.title')             Войти
+```
+
+### Hover Tooltip
+Hover over any key to see its translated value for all configured locales in a popup.
+
+### Autocomplete
+Get key suggestions when typing inside a string — includes the translated value as documentation.
+
+### Missing Key Diagnostics
+Keys that have no matching entry in any locale JSON file are underlined with a warning so you catch typos early.
+
+```ts
+t('task.nonexistent')  // ⚠ i18n key not found: "task.nonexistent"
+```
 
 ## Default Behavior
 
@@ -102,4 +114,3 @@ Enable all file types:
   "i18nJsonGotoDefinition.enabledLanguageIds": []
 }
 ```
-

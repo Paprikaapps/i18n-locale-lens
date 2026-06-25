@@ -1,8 +1,8 @@
 {
   "name": "i18n-json-goto-definition",
   "displayName": "i18n Locale Lens",
-  "description": "Jump between i18n keys in code and their JSON locale definitions — in both directions.",
-  "version": "0.2.3",
+  "description": "Jump to locale JSON definitions, see translations inline, hover tooltips, autocomplete, and missing key diagnostics.",
+  "version": "0.2.4",
   "publisher": "Paprikaapps",
   "repository": {
     "type": "git",

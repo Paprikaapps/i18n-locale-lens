@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.4
+
+- Reverted inline decoration to clean italic text style (no badge/border) using inlay hint color for better readability.
+- Updated README and description to reflect current features.
+
 ## 0.2.3
 
 - Fixed false positive warnings on PascalCase/TitleCase dot-separated strings (e.g. Mixpanel tracking events like 'User.Filtration.Click').

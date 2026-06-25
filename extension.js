@@ -126,13 +126,8 @@ function activate(context) {
   inlineDecorationType = vscode.window.createTextEditorDecorationType({
     after: {
       color: new vscode.ThemeColor('editorInlayHint.foreground'),
-      backgroundColor: new vscode.ThemeColor('editorInlayHint.background'),
-      fontStyle: 'normal',
-      border: '1px solid',
-      borderColor: new vscode.ThemeColor('editorInlayHint.background'),
-      borderRadius: '3px',
-      margin: '0 0 0 0.75em',
-      padding: '0 4px'
+      fontStyle: 'italic',
+      margin: '0 0 0 1em'
     }
   });
 
@@ -1188,8 +1183,7 @@ function collectInlineDecorations(document, workspaceFolder, config) {
     }
 
     // Truncate long values
-    const truncated = value.length > 50 ? value.slice(0, 47) + '…' : value;
-    const label = `→ ${truncated}`;
+    const label = value.length > 60 ? value.slice(0, 57) + '…' : value;
     const endPos = document.positionAt(match.index + match[0].length);
 
     decorations.push({
