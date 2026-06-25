@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0
+
+- Updated repository URL to the Paprikaapps GitHub organization.
+
 ## 0.0.9
 
 - Added repository field to package.json.
