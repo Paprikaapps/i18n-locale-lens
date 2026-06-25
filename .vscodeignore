@@ -1,0 +1,9 @@
+.git/**
+.vscode/**
+.gitignore
+PUBLISHING.md
+node_modules/**
+*.vsix
+npm-debug.log
+yarn-error.log
+package-lock.json

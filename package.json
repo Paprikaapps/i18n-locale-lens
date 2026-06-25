@@ -1,0 +1,118 @@
+{
+  "name": "i18n-json-goto-definition",
+  "displayName": "i18n Locale Lens",
+  "description": "Jump between i18n keys in code and their JSON locale definitions — in both directions.",
+  "version": "0.0.9",
+  "publisher": "Paprikaapps",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cthegost/i18n-locale-lens"
+  },
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "i18n",
+    "i18next",
+    "locale",
+    "translation",
+    "localization",
+    "json",
+    "goto-definition"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./extension.js",
+  "scripts": {
+    "check": "node -c extension.js",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.9.2"
+  },
+  "contributes": {
+    "configuration": {
+      "title": "i18n JSON Go to Definition",
+      "properties": {
+        "i18nJsonGotoDefinition.enabledLanguageIds": {
+          "type": "array",
+          "default": [
+            "typescript",
+            "typescriptreact",
+            "javascript",
+            "javascriptreact"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Language IDs where Go to Definition is enabled. Empty array enables all languages."
+        },
+        "i18nJsonGotoDefinition.locales": {
+          "type": "array",
+          "default": [
+            "ru"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Locales to search. The first matching locale is used for navigation."
+        },
+        "i18nJsonGotoDefinition.pathTemplates": {
+          "type": "array",
+          "default": [
+            "public/locales/{locale}/{namespaceFile}.json"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "JSON path templates relative to the workspace. Supported placeholders: {locale}, {language}, {namespace}, {namespaceFile}."
+        },
+        "i18nJsonGotoDefinition.defaultNamespace": {
+          "type": "string",
+          "default": "translation",
+          "description": "Namespace used for keys without an explicit namespace."
+        },
+        "i18nJsonGotoDefinition.namespaceFileMap": {
+          "type": "object",
+          "default": {
+            "translation": "common",
+            "common": "common"
+          },
+          "description": "Mapping from namespace to file name without .json. If a namespace is not mapped, the namespace itself is used."
+        },
+        "i18nJsonGotoDefinition.namespaceSeparator": {
+          "type": "string",
+          "default": ":",
+          "description": "Separator between namespace and key, as in i18next."
+        },
+        "i18nJsonGotoDefinition.keySeparator": {
+          "type": "string",
+          "default": ".",
+          "description": "Separator between nested key parts in JSON."
+        },
+        "i18nJsonGotoDefinition.searchAllNamespaceFilesForKeysWithoutNamespace": {
+          "type": "boolean",
+          "default": true,
+          "description": "Search all JSON files in configured locale directories when a key without namespace is not found in defaultNamespace."
+        },
+        "i18nJsonGotoDefinition.resolveTemplateStringExpressions": {
+          "type": "boolean",
+          "default": true,
+          "description": "Resolve simple template string expressions that reference local string constants, for example `${BASE_KEY}.title`."
+        },
+        "i18nJsonGotoDefinition.ignoreTemplateStringsWithExpressions": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ignore template strings with expressions like `${...}` when they cannot be resolved."
+        }
+      }
+    }
+  }
+}

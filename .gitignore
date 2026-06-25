@@ -1,0 +1,5 @@
+node_modules/
+*.vsix
+package-lock.json
+npm-debug.log
+yarn-error.log
