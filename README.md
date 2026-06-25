@@ -7,6 +7,11 @@ Jump between i18n keys in code and their JSON locale definitions — in both dir
 
 ## Features
 
+- **Go to Definition** — press `F12` on a key to jump to its entry in the locale JSON.
+- **Hover tooltip** — hover over a key to see its translated value for all configured locales.
+- **Autocomplete** — get key suggestions when typing inside a string literal.
+- **Inline decorations** — the translated text is shown in italic directly after each key in the editor.
+- **Diagnostics** — keys with no matching entry in any locale JSON are underlined with a warning.
 - Supports JavaScript, TypeScript, JSX, and TSX by default.
 - Can be enabled for any VS Code language ID through settings.
 - Works with nested JSON objects and dot-separated keys.
@@ -14,7 +19,6 @@ Jump between i18n keys in code and their JSON locale definitions — in both dir
 - Resolves simple template strings based on local string constants.
 - Supports configurable locale path templates.
 - Can search multiple locales and multiple namespace files.
-- Reverse navigation from JSON locale keys to all their usages in source code.
 
 ## Default Behavior
 

@@ -23,8 +23,13 @@ const IDENTIFIER_REGEXP = /^[A-Za-z_$][\w$]*$/;
  *
  * @param {vscode.ExtensionContext} context VS Code extension context.
  */
+
+/** @type {vscode.TextEditorDecorationType} */
+let inlineDecorationType;
+
 function activate(context) {
-  const provider = vscode.languages.registerDefinitionProvider(
+  // Go to Definition: code → JSON
+  const definitionProvider = vscode.languages.registerDefinitionProvider(
     { scheme: 'file' },
     {
       provideDefinition(document, position) {
@@ -51,17 +56,129 @@ function activate(context) {
     }
   );
 
-  const jsonProvider = vscode.languages.registerDefinitionProvider(
-    { scheme: 'file', language: 'json' },
+  // Hover: show translation value when hovering over a key
+  const hoverProvider = vscode.languages.registerHoverProvider(
+    { scheme: 'file' },
     {
-      provideDefinition(document, position, token) {
-        return provideDefinitionFromJson(document, position, token);
+      provideHover(document, position) {
+        const config = getExtensionConfig(document.uri);
+
+        if (!isLanguageEnabled(document, config)) {
+          return undefined;
+        }
+
+        const rawKey = getTranslationKeyAtPosition(document, position, config);
+
+        if (!rawKey) {
+          return undefined;
+        }
+
+        const translationKey = parseTranslationKey(rawKey, config);
+
+        if (!translationKey) {
+          return undefined;
+        }
+
+        return buildHover(document, translationKey, config);
       }
     }
   );
 
-  context.subscriptions.push(provider);
-  context.subscriptions.push(jsonProvider);
+  // Autocomplete: suggest keys inside t('...')
+  const completionProvider = vscode.languages.registerCompletionItemProvider(
+    { scheme: 'file' },
+    {
+      provideCompletionItems(document, position) {
+        const config = getExtensionConfig(document.uri);
+
+        if (!isLanguageEnabled(document, config)) {
+          return undefined;
+        }
+
+        return buildCompletionItems(document, position, config);
+      }
+    },
+    "'", '"', '`', '.'
+  );
+
+  // Diagnostics: underline keys that don't exist in JSON
+  const diagnosticCollection = vscode.languages.createDiagnosticCollection('i18n-locale-lens');
+
+  const refreshDiagnostics = (document) => {
+    const config = getExtensionConfig(document.uri);
+
+    if (!isLanguageEnabled(document, config)) {
+      diagnosticCollection.delete(document.uri);
+      return;
+    }
+
+    const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
+
+    if (!workspaceFolder) {
+      return;
+    }
+
+    diagnosticCollection.set(document.uri, collectMissingKeyDiagnostics(document, workspaceFolder, config));
+  };
+
+  // Inline decorations: show translation text after key in editor
+  inlineDecorationType = vscode.window.createTextEditorDecorationType({
+    after: {
+      color: new vscode.ThemeColor('editorCodeLens.foreground'),
+      fontStyle: 'italic',
+      margin: '0 0 0 1em'
+    }
+  });
+
+  const refreshDecorations = (editor) => {
+    if (!editor) {
+      return;
+    }
+
+    const config = getExtensionConfig(editor.document.uri);
+
+    if (!isLanguageEnabled(editor.document, config)) {
+      editor.setDecorations(inlineDecorationType, []);
+      return;
+    }
+
+    const workspaceFolder = vscode.workspace.getWorkspaceFolder(editor.document.uri);
+
+    if (!workspaceFolder) {
+      return;
+    }
+
+    editor.setDecorations(inlineDecorationType, collectInlineDecorations(editor.document, workspaceFolder, config));
+  };
+
+  if (vscode.window.activeTextEditor) {
+    refreshDiagnostics(vscode.window.activeTextEditor.document);
+    refreshDecorations(vscode.window.activeTextEditor);
+  }
+
+  context.subscriptions.push(
+    definitionProvider,
+    hoverProvider,
+    completionProvider,
+    diagnosticCollection,
+    inlineDecorationType,
+    vscode.workspace.onDidOpenTextDocument(refreshDiagnostics),
+    vscode.workspace.onDidChangeTextDocument((e) => {
+      refreshDiagnostics(e.document);
+
+      const editor = vscode.window.visibleTextEditors.find((ed) => ed.document === e.document);
+
+      if (editor) {
+        refreshDecorations(editor);
+      }
+    }),
+    vscode.window.onDidChangeActiveTextEditor((editor) => {
+      if (editor) {
+        refreshDiagnostics(editor.document);
+        refreshDecorations(editor);
+      }
+    })
+  );
 }
 
 /**
@@ -696,76 +813,81 @@ function offsetToPosition(text, offset) {
   return new vscode.Position(line, character);
 }
 
+
+// ─── Hover ───────────────────────────────────────────────────────────────────
+
 /**
- * Provides Go to Definition from a JSON locale key to its usages in source code.
+ * Builds a hover showing translation values for all configured locales.
  *
- * @param {vscode.TextDocument} document JSON locale document.
- * @param {vscode.Position} position cursor position.
- * @param {vscode.CancellationToken} token cancellation token.
- * @returns {Promise<vscode.Location[] | undefined>}
+ * @param {vscode.TextDocument} document source document.
+ * @param {TranslationKey} translationKey parsed translation key.
+ * @param {ExtensionConfig} config extension settings.
+ * @returns {vscode.Hover | undefined}
  */
-async function provideDefinitionFromJson(document, position, token) {
+function buildHover(document, translationKey, config) {
   const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
 
   if (!workspaceFolder) {
     return undefined;
   }
 
-  const config = getExtensionConfig(document.uri);
-  const namespaces = inferNamespacesFromFilePath(document.uri.fsPath, workspaceFolder.uri.fsPath, config);
+  const lines = [];
 
-  if (!namespaces) {
-    return undefined;
-  }
+  for (const locale of config.locales) {
+    const namespaceFiles = getCandidateNamespaceFiles(workspaceFolder.uri.fsPath, translationKey, config);
 
-  const keyPath = getJsonKeyAtPosition(document, position, config);
+    for (const filePath of namespaceFiles) {
+      const value = findKeyValueInFile(filePath, translationKey.key, config);
 
-  if (!keyPath) {
-    return undefined;
-  }
-
-  const searchKeys = buildSearchKeys(keyPath, namespaces, config);
-
-  return findKeyUsagesInCode(workspaceFolder, searchKeys, config, token);
-}
-
-/**
- * Returns the full key path at the cursor position inside a JSON document.
- *
- * @param {vscode.TextDocument} document JSON document.
- * @param {vscode.Position} position cursor position.
- * @param {ExtensionConfig} config extension settings.
- * @returns {string | null}
- */
-function getJsonKeyAtPosition(document, position, config) {
-  const text = document.getText();
-  const cursorOffset = document.offsetAt(position);
-  const keyRanges = parseJsonKeyRanges(text, config.keySeparator);
-
-  for (const [keyPath, range] of keyRanges) {
-    if (cursorOffset >= range.start && cursorOffset <= range.end) {
-      return keyPath;
+      if (value !== undefined) {
+        lines.push(`**${locale}**: ${value}`);
+        break;
+      }
     }
   }
 
-  return null;
+  if (lines.length === 0) {
+    return undefined;
+  }
+
+  return new vscode.Hover(new vscode.MarkdownString(lines.join('\n\n')));
 }
 
 /**
- * Parses JSON text and returns a map of key paths to their source character ranges.
- * The range covers the opening quote through the closing quote of the key string.
+ * Reads the string value of a translation key from a JSON locale file.
  *
- * @param {string} text JSON text.
- * @param {string} keySeparator key path separator.
- * @returns {Map<string, {start: number, end: number}>}
+ * @param {string} filePath JSON locale file path.
+ * @param {string} key full translation key.
+ * @param {ExtensionConfig} config extension settings.
+ * @returns {string | undefined}
  */
-function parseJsonKeyRanges(text, keySeparator) {
-  const ranges = new Map();
+function findKeyValueInFile(filePath, key, config) {
+  if (!fs.existsSync(filePath)) {
+    return undefined;
+  }
+
+  try {
+    const text = fs.readFileSync(filePath, 'utf8');
+    return parseJsonKeyValues(text, config.keySeparator).get(key);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Parses JSON and returns a map of key paths to their string values.
+ *
+ * @param {string} text JSON file content.
+ * @param {string} keySeparator key path separator.
+ * @returns {Map<string, string>}
+ */
+function parseJsonKeyValues(text, keySeparator) {
+  const values = new Map();
   let index = 0;
 
   parseValue([]);
 
-  return ranges;
+  return values;
 
   function parseValue(pathParts) {
     skipWhitespace();
@@ -780,7 +902,11 @@ function parseJsonKeyRanges(text, keySeparator) {
       return;
     }
 
-    skipPrimitive();
+    const value = parsePrimitive();
+
+    if (pathParts.length > 0 && typeof value === 'string') {
+      values.set(pathParts.join(keySeparator), value);
+    }
   }
 
   function parseObject(pathParts) {
@@ -788,31 +914,15 @@ function parseJsonKeyRanges(text, keySeparator) {
     skipWhitespace();
 
     while (index < text.length && text[index] !== '}') {
-      const keyStart = index;
       const key = parseString();
-      const keyEnd = index - 1;
-      const keyPath = [...pathParts, key].join(keySeparator);
-
-      ranges.set(keyPath, { start: keyStart, end: keyEnd });
-
       skipWhitespace();
-
-      if (text[index] === ':') {
-        index += 1;
-      }
-
+      if (text[index] === ':') index += 1;
       parseValue([...pathParts, key]);
       skipWhitespace();
-
-      if (text[index] === ',') {
-        index += 1;
-        skipWhitespace();
-      }
+      if (text[index] === ',') { index += 1; skipWhitespace(); }
     }
 
-    if (text[index] === '}') {
-      index += 1;
-    }
+    if (text[index] === '}') index += 1;
   }
 
   function parseArray(pathParts) {
@@ -822,50 +932,31 @@ function parseJsonKeyRanges(text, keySeparator) {
     while (index < text.length && text[index] !== ']') {
       parseValue(pathParts);
       skipWhitespace();
-
-      if (text[index] === ',') {
-        index += 1;
-        skipWhitespace();
-      }
+      if (text[index] === ',') { index += 1; skipWhitespace(); }
     }
 
-    if (text[index] === ']') {
-      index += 1;
-    }
+    if (text[index] === ']') index += 1;
   }
 
   function parseString() {
     let result = '';
-
-    if (text[index] !== '"') {
-      return result;
-    }
-
+    if (text[index] !== '"') return result;
     index += 1;
 
     while (index < text.length) {
       const char = text[index];
-
-      if (char === '"') {
-        index += 1;
-        return result;
-      }
-
+      if (char === '"') { index += 1; return result; }
       if (char === '\\') {
-        const nextChar = text[index + 1];
-
-        if (nextChar === 'u') {
-          const code = text.slice(index + 2, index + 6);
-          result += String.fromCharCode(parseInt(code, 16));
+        const next = text[index + 1];
+        if (next === 'u') {
+          result += String.fromCharCode(parseInt(text.slice(index + 2, index + 6), 16));
           index += 6;
           continue;
         }
-
-        result += getEscapedCharacter(nextChar);
+        result += getEscapedCharacter(next);
         index += 2;
         continue;
       }
-
       result += char;
       index += 1;
     }
@@ -873,244 +964,225 @@ function parseJsonKeyRanges(text, keySeparator) {
     return result;
   }
 
-  function skipPrimitive() {
+  function parsePrimitive() {
     if (text[index] === '"') {
-      parseString();
-      return;
+      return parseString();
     }
 
+    let raw = '';
     while (index < text.length && !/[\s,\]}]/.test(text[index])) {
+      raw += text[index];
       index += 1;
     }
+
+    return raw;
   }
 
   function skipWhitespace() {
-    while (index < text.length && /\s/.test(text[index])) {
-      index += 1;
-    }
+    while (index < text.length && /\s/.test(text[index])) index += 1;
   }
 }
 
-/**
- * Converts a path template to a regular expression with capture groups for namespace placeholders.
- *
- * @param {string} template path template string.
- * @returns {{ regex: RegExp, groups: Record<number, string> }}
- */
-function templateToRegex(template) {
-  const groups = {};
-  let groupNum = 1;
-  let pattern = '^';
-
-  const parts = template.split(/(\{(?:locale|language|namespace|namespaceFile)\})/g);
-
-  for (const part of parts) {
-    const placeholderMatch = /^\{(locale|language|namespace|namespaceFile)\}$/.exec(part);
-
-    if (placeholderMatch) {
-      const name = placeholderMatch[1];
-
-      if (name === 'namespace' || name === 'namespaceFile') {
-        groups[groupNum] = name;
-        groupNum += 1;
-        pattern += '([^/]+)';
-      } else {
-        pattern += '[^/]+';
-      }
-    } else {
-      pattern += part.replace(/[.+*?^${}()|[\]\\]/g, '\\$&');
-    }
-  }
-
-  pattern += '$';
-
-  return { regex: new RegExp(pattern), groups };
-}
+// ─── Autocomplete ─────────────────────────────────────────────────────────────
 
 /**
- * Infers namespace names for a JSON file by matching it against configured path templates.
- * Falls back to locale directory detection when no template matches.
- * Returns null when the file cannot be identified as a locale file at all.
+ * Builds completion items for all known translation keys in the workspace.
  *
- * @param {string} filePath absolute path to the JSON file.
- * @param {string} workspaceRoot workspace root path.
+ * @param {vscode.TextDocument} document source document.
+ * @param {vscode.Position} position cursor position.
  * @param {ExtensionConfig} config extension settings.
- * @returns {string[] | null}
+ * @returns {vscode.CompletionItem[] | undefined}
  */
-function inferNamespacesFromFilePath(filePath, workspaceRoot, config) {
-  const relativePath = path.relative(workspaceRoot, filePath).replace(/\\/g, '/');
+function buildCompletionItems(document, position, config) {
+  const line = document.lineAt(position.line).text.slice(0, position.character);
 
-  for (const template of config.pathTemplates) {
-    const { regex, groups } = templateToRegex(template);
-    const match = regex.exec(relativePath);
-
-    if (!match) {
-      continue;
-    }
-
-    let namespace = null;
-    let namespaceFile = null;
-
-    for (const [groupIndex, groupName] of Object.entries(groups)) {
-      if (groupName === 'namespace') {
-        namespace = match[parseInt(groupIndex)];
-      } else if (groupName === 'namespaceFile') {
-        namespaceFile = match[parseInt(groupIndex)];
-      }
-    }
-
-    if (namespace) {
-      return [namespace];
-    }
-
-    if (namespaceFile) {
-      return resolveNamespacesFromFile(namespaceFile, config);
-    }
-
-    return [config.defaultNamespace];
+  // Only trigger inside a string literal that looks like a translation call
+  if (!isInsideTranslationString(line)) {
+    return undefined;
   }
 
-  // Fallback: check whether the file lives inside any configured locale directory.
-  const fileDir = path.dirname(filePath);
-  const namespaceFile = path.basename(filePath, '.json');
+  const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
+
+  if (!workspaceFolder) {
+    return undefined;
+  }
+
+  const items = [];
+  const seen = new Set();
 
   for (const locale of config.locales) {
-    for (const localeDir of getLocaleDirectories(workspaceRoot, locale, config)) {
-      if (fileDir === localeDir || fileDir.startsWith(localeDir + path.sep)) {
-        return resolveNamespacesFromFile(namespaceFile, config);
+    const localeFiles = getAllLocaleJsonFiles(workspaceFolder.uri.fsPath, locale, config);
+
+    for (const filePath of localeFiles) {
+      const namespaceFile = path.basename(filePath, '.json');
+      const namespace = resolveFileNamespace(namespaceFile, config);
+
+      try {
+        const text = fs.readFileSync(filePath, 'utf8');
+        const keyValues = parseJsonKeyValues(text, config.keySeparator);
+
+        for (const [keyPath, value] of keyValues) {
+          const fullKey = namespace !== config.defaultNamespace
+            ? `${namespace}${config.namespaceSeparator || ':'}${keyPath}`
+            : keyPath;
+
+          if (seen.has(fullKey)) {
+            continue;
+          }
+
+          seen.add(fullKey);
+
+          const item = new vscode.CompletionItem(fullKey, vscode.CompletionItemKind.Value);
+          item.detail = value;
+          item.documentation = new vscode.MarkdownString(`**${locale}**: ${value}`);
+          items.push(item);
+        }
+      } catch {
+        // skip unreadable files
       }
     }
   }
 
-  return null;
+  return items;
 }
 
 /**
- * Resolves namespace names from a namespace file name using the configured namespace file map.
+ * Returns true when the line up to the cursor appears to be inside a translation string.
  *
- * @param {string} namespaceFile namespace file name without extension.
- * @param {ExtensionConfig} config extension settings.
- * @returns {string[]}
+ * @param {string} lineUpToCursor text of the current line up to cursor.
+ * @returns {boolean}
  */
-function resolveNamespacesFromFile(namespaceFile, config) {
-  const namespaces = [];
-
-  for (const [ns, file] of Object.entries(config.namespaceFileMap)) {
-    if (file === namespaceFile) {
-      namespaces.push(ns);
-    }
-  }
-
-  if (namespaces.length === 0) {
-    namespaces.push(namespaceFile);
-  }
-
-  return namespaces;
+function isInsideTranslationString(lineUpToCursor) {
+  const openQuote = lineUpToCursor.match(/(['"`])[^'"` ]*$/);
+  return Boolean(openQuote);
 }
 
 /**
- * Builds all key strings that could appear in source code for a given JSON key and namespace list.
+ * Resolves the primary namespace for a given locale file name.
  *
- * @param {string} keyPath translation key path (e.g. "login.title").
- * @param {string[]} namespaces namespace names inferred from the locale file.
- * @param {ExtensionConfig} config extension settings.
- * @returns {string[]}
- */
-function buildSearchKeys(keyPath, namespaces, config) {
-  const keys = new Set();
-  const sep = config.namespaceSeparator || ':';
-
-  for (const namespace of namespaces) {
-    keys.add(`${namespace}${sep}${keyPath}`);
-  }
-
-  // Always include the bare key: it is used when the namespace is the default one,
-  // or when the namespace is provided implicitly via useTranslation / i18n.init.
-  keys.add(keyPath);
-
-  return Array.from(keys);
-}
-
-/**
- * Searches source files in the workspace for string literal usages of translation keys.
- * Uses VS Code's built-in text search (ripgrep) for performance.
- *
- * @param {vscode.WorkspaceFolder} workspaceFolder workspace folder to search.
- * @param {string[]} searchKeys key strings to look for.
- * @param {ExtensionConfig} config extension settings.
- * @param {vscode.CancellationToken} token cancellation token.
- * @returns {Promise<vscode.Location[]>}
- */
-async function findKeyUsagesInCode(workspaceFolder, searchKeys, config, token) {
-  const locations = [];
-  const fileGlob = buildSourceFileGlob(config);
-  const include = new vscode.RelativePattern(workspaceFolder, fileGlob);
-
-  for (const searchKey of searchKeys) {
-    if (token && token.isCancellationRequested) {
-      break;
-    }
-
-    const escaped = searchKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-    await vscode.workspace.findTextInFiles(
-      { pattern: `['"\`]${escaped}['"\`]`, isRegExp: true },
-      { include, exclude: '**/node_modules/**' },
-      (result) => {
-        if (token && token.isCancellationRequested) {
-          return;
-        }
-
-        // findTextInFiles yields both TextSearchMatch (has ranges) and
-        // TextSearchContext (no ranges). Skip context-only results.
-        if (!result.ranges) {
-          return;
-        }
-
-        const ranges = Array.isArray(result.ranges) ? result.ranges : [result.ranges];
-
-        for (const range of ranges) {
-          // Shift one character right to skip the opening quote
-          const start = new vscode.Position(range.start.line, range.start.character + 1);
-          locations.push(new vscode.Location(result.uri, start));
-        }
-      },
-      token
-    );
-  }
-
-  return locations;
-}
-
-/**
- * Builds a glob pattern that matches all source files for the enabled language IDs.
- *
+ * @param {string} namespaceFile file name without extension.
  * @param {ExtensionConfig} config extension settings.
  * @returns {string}
  */
-function buildSourceFileGlob(config) {
-  const langToExt = {
-    typescript: 'ts',
-    typescriptreact: 'tsx',
-    javascript: 'js',
-    javascriptreact: 'jsx',
-    vue: 'vue',
-    svelte: 'svelte'
-  };
-
-  const extensions = config.enabledLanguageIds
-    .map((lang) => langToExt[lang] || lang)
-    .filter(Boolean);
-
-  if (extensions.length === 0) {
-    return '**/*.{ts,tsx,js,jsx}';
+function resolveFileNamespace(namespaceFile, config) {
+  for (const [ns, file] of Object.entries(config.namespaceFileMap)) {
+    if (file === namespaceFile && ns === config.defaultNamespace) {
+      return config.defaultNamespace;
+    }
   }
 
-  if (extensions.length === 1) {
-    return `**/*.${extensions[0]}`;
+  for (const [ns, file] of Object.entries(config.namespaceFileMap)) {
+    if (file === namespaceFile) {
+      return ns;
+    }
   }
 
-  return `**/*.{${extensions.join(',')}}`;
+  return namespaceFile;
+}
+
+// ─── Inline decorations ───────────────────────────────────────────────────────
+
+/**
+ * Builds inline decoration options showing translation values after each key.
+ *
+ * @param {vscode.TextDocument} document source document.
+ * @param {vscode.WorkspaceFolder} workspaceFolder workspace folder.
+ * @param {ExtensionConfig} config extension settings.
+ * @returns {vscode.DecorationOptions[]}
+ */
+function collectInlineDecorations(document, workspaceFolder, config) {
+  const decorations = [];
+  const text = document.getText();
+  let match;
+
+  STRING_RANGE_REGEXP.lastIndex = 0;
+
+  while ((match = STRING_RANGE_REGEXP.exec(text))) {
+    const rawKey = unescapeStringLiteral(match[2]);
+    const translationKey = parseTranslationKey(rawKey, config);
+
+    if (!translationKey) {
+      continue;
+    }
+
+    const namespaceFiles = getCandidateNamespaceFiles(workspaceFolder.uri.fsPath, translationKey, config);
+    let value;
+
+    for (const filePath of namespaceFiles) {
+      value = findKeyValueInFile(filePath, translationKey.key, config);
+      if (value !== undefined) break;
+    }
+
+    if (value === undefined) {
+      continue;
+    }
+
+    // Truncate long values
+    const label = value.length > 60 ? value.slice(0, 57) + '…' : value;
+    const endPos = document.positionAt(match.index + match[0].length);
+
+    decorations.push({
+      range: new vscode.Range(endPos, endPos),
+      renderOptions: { after: { contentText: label } }
+    });
+  }
+
+  return decorations;
+}
+
+// ─── Diagnostics ─────────────────────────────────────────────────────────────
+
+/**
+ * Scans a document and returns diagnostics for translation keys that have no matching JSON entry.
+ *
+ * @param {vscode.TextDocument} document source document.
+ * @param {vscode.WorkspaceFolder} workspaceFolder workspace folder.
+ * @param {ExtensionConfig} config extension settings.
+ * @returns {vscode.Diagnostic[]}
+ */
+function collectMissingKeyDiagnostics(document, workspaceFolder, config) {
+  const diagnostics = [];
+  const text = document.getText();
+  let match;
+
+  STRING_RANGE_REGEXP.lastIndex = 0;
+
+  while ((match = STRING_RANGE_REGEXP.exec(text))) {
+    const rawKey = unescapeStringLiteral(match[2]);
+    const translationKey = parseTranslationKey(rawKey, config);
+
+    if (!translationKey) {
+      continue;
+    }
+
+    const namespaceFiles = getCandidateNamespaceFiles(workspaceFolder.uri.fsPath, translationKey, config);
+    let found = false;
+
+    for (const filePath of namespaceFiles) {
+      if (findKeyValueInFile(filePath, translationKey.key, config) !== undefined) {
+        found = true;
+        break;
+      }
+    }
+
+    if (found) {
+      continue;
+    }
+
+    const startPos = document.positionAt(match.index + 1);
+    const endPos = document.positionAt(match.index + match[0].length - 1);
+    const range = new vscode.Range(startPos, endPos);
+    const diagnostic = new vscode.Diagnostic(
+      range,
+      `i18n key not found: "${rawKey}"`,
+      vscode.DiagnosticSeverity.Warning
+    );
+
+    diagnostic.source = 'i18n Locale Lens';
+    diagnostics.push(diagnostic);
+  }
+
+  return diagnostics;
 }
 
 /**

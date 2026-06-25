@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0
+
+- Added hover tooltip: hovering over an i18n key shows its translated value for all configured locales.
+- Added autocomplete: suggests all known translation keys when typing inside a string literal.
+- Added inline decorations: the translated text is shown in italic after each key directly in the editor.
+- Added diagnostics: keys that have no matching entry in any locale JSON are underlined with a warning.
+
 ## 0.1.1
 
 - Fixed reverse navigation not working when the locale file path does not exactly match path templates: added fallback locale directory detection.
