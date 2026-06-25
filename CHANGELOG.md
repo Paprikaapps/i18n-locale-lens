@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1
+
+- Fixed reverse navigation not working when the locale file path does not exactly match path templates: added fallback locale directory detection.
+- Fixed silent crash when findTextInFiles returns context-only results without ranges.
+- Reverse navigation now always searches for the bare key in addition to namespace-prefixed variants.
+
 ## 0.1.0
 
 - Updated repository URL to the Paprikaapps GitHub organization.

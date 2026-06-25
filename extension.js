@@ -929,7 +929,8 @@ function templateToRegex(template) {
 
 /**
  * Infers namespace names for a JSON file by matching it against configured path templates.
- * Returns null when the file does not match any locale path template.
+ * Falls back to locale directory detection when no template matches.
+ * Returns null when the file cannot be identified as a locale file at all.
  *
  * @param {string} filePath absolute path to the JSON file.
  * @param {string} workspaceRoot workspace root path.
@@ -963,25 +964,48 @@ function inferNamespacesFromFilePath(filePath, workspaceRoot, config) {
     }
 
     if (namespaceFile) {
-      const namespaces = [];
-
-      for (const [ns, file] of Object.entries(config.namespaceFileMap)) {
-        if (file === namespaceFile) {
-          namespaces.push(ns);
-        }
-      }
-
-      if (namespaces.length === 0) {
-        namespaces.push(namespaceFile);
-      }
-
-      return namespaces;
+      return resolveNamespacesFromFile(namespaceFile, config);
     }
 
     return [config.defaultNamespace];
   }
 
+  // Fallback: check whether the file lives inside any configured locale directory.
+  const fileDir = path.dirname(filePath);
+  const namespaceFile = path.basename(filePath, '.json');
+
+  for (const locale of config.locales) {
+    for (const localeDir of getLocaleDirectories(workspaceRoot, locale, config)) {
+      if (fileDir === localeDir || fileDir.startsWith(localeDir + path.sep)) {
+        return resolveNamespacesFromFile(namespaceFile, config);
+      }
+    }
+  }
+
   return null;
+}
+
+/**
+ * Resolves namespace names from a namespace file name using the configured namespace file map.
+ *
+ * @param {string} namespaceFile namespace file name without extension.
+ * @param {ExtensionConfig} config extension settings.
+ * @returns {string[]}
+ */
+function resolveNamespacesFromFile(namespaceFile, config) {
+  const namespaces = [];
+
+  for (const [ns, file] of Object.entries(config.namespaceFileMap)) {
+    if (file === namespaceFile) {
+      namespaces.push(ns);
+    }
+  }
+
+  if (namespaces.length === 0) {
+    namespaces.push(namespaceFile);
+  }
+
+  return namespaces;
 }
 
 /**
@@ -998,11 +1022,11 @@ function buildSearchKeys(keyPath, namespaces, config) {
 
   for (const namespace of namespaces) {
     keys.add(`${namespace}${sep}${keyPath}`);
-
-    if (namespace === config.defaultNamespace) {
-      keys.add(keyPath);
-    }
   }
+
+  // Always include the bare key: it is used when the namespace is the default one,
+  // or when the namespace is provided implicitly via useTranslation / i18n.init.
+  keys.add(keyPath);
 
   return Array.from(keys);
 }
@@ -1034,6 +1058,12 @@ async function findKeyUsagesInCode(workspaceFolder, searchKeys, config, token) {
       { include, exclude: '**/node_modules/**' },
       (result) => {
         if (token && token.isCancellationRequested) {
+          return;
+        }
+
+        // findTextInFiles yields both TextSearchMatch (has ranges) and
+        // TextSearchContext (no ranges). Skip context-only results.
+        if (!result.ranges) {
           return;
         }
 
